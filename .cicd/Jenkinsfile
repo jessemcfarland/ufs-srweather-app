@@ -1,0 +1,151 @@
+pipeline {
+    agent none
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
+    parameters {
+        // choice(name: 'SRW_PLATFORM_FILTER', choices: ['all', 'cheyenne', 'gaea', 'orion', 'pcluster_noaa_v2_use1', 'azcluster_noaa', 'gcluster_noaa_v2_usc1'], description: 'Specify the platform(s) to use')
+        choice(name: 'SRW_PLATFORM_FILTER', choices: ['all', 'cheyenne', 'gaea', 'orion'], description: 'Specify the platform(s) to use')
+        choice(name: 'SRW_COMPILER_FILTER', choices: ['all', 'gnu', 'intel'], description: 'Specify the compiler(s) to use to build')
+    }
+
+    stages {
+        /*
+        stage('Start Parallel Works Clusters') {
+            matrix {
+                when {
+                    anyOf {
+                        expression { params.SRW_PLATFORM_FILTER == 'all' }
+                        expression { params.SRW_PLATFORM_FILTER == env.SRW_PLATFORM }
+                    }
+                }
+
+                axes {
+                    axis {
+                        name 'SRW_PLATFORM'
+                        values 'pcluster_noaa_v2_use1', 'azcluster_noaa', 'gcluster_noaa_v2_usc1'
+                    }
+                }
+
+                stages {
+                    stage('Start Cluster') {
+                        steps {
+                            build job: 'NOAA-EPIC/parallel-works-jenkins-client/start-cluster', parameters: [string(name: 'PW_CLUSTER_NAME', value: env.SRW_PLATFORM), string(name: 'PW_CLUSTER_SSH_KEY', value: '~/.ssh/id_rsa'), string(name: 'JAVA_VERSION', value: '11')]
+                        }
+                    }
+                }
+            }
+        }
+        */
+
+        stage('Build and Test') {
+            matrix {
+                when {
+                    allOf {
+                        anyOf {
+                            expression { params.SRW_PLATFORM_FILTER == 'all' }
+                            expression { params.SRW_PLATFORM_FILTER == env.SRW_PLATFORM }
+                        }
+
+                        anyOf {
+                            expression { params.SRW_COMPILER_FILTER == 'all' }
+                            expression { params.SRW_COMPILER_FILTER == env.SRW_COMPILER }
+                        }
+                    }
+                }
+
+                axes {
+                    axis {
+                        name 'SRW_PLATFORM'
+                        // values 'cheyenne', 'gaea', 'orion', 'pcluster_noaa_v2_use1', 'azcluster_noaa', 'gcluster_noaa_v2_usc1'
+                        values 'cheyenne', 'gaea', 'orion'
+                    }
+
+                    axis {
+                        name 'SRW_COMPILER'
+                        values 'gnu', 'intel'
+                    }
+                }
+
+                excludes {
+                    exclude {
+                            axis {
+                            name 'SRW_PLATFORM'
+                            values 'gaea', 'orion'
+                        }
+
+                        axis {
+                            name 'SRW_COMPILER'
+                            values 'gnu'
+                        }
+                    }
+                }
+
+                agent {
+                    label env.SRW_PLATFORM
+                }
+
+                environment {
+                    BUILD_VERSION = "${env.SRW_PLATFORM}-${env.SRW_COMPILER}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+                    BUILD_NAME = "ufs-srweather-app_${env.BUILD_VERSION}"
+                }
+
+                stages {
+                    stage('Initialize') {
+                        steps {
+                            echo "Initializing SRW (${env.SRW_COMPILER}) build environment on ${env.SRW_PLATFORM}"
+                            cleanWs()
+                            checkout scm
+                            sh '"${WORKSPACE}/manage_externals/checkout_externals"'
+                        }
+                    }
+
+                    stage('Build') {
+                        steps {
+                            echo "Building SRW (${env.SRW_COMPILER}) on ${env.SRW_PLATFORM}"
+                            sh 'bash --login "${WORKSPACE}/.cicd/scripts/srw_build.sh"'
+                        }
+
+                        post {
+                            success {
+                                sh 'tar --create --gzip --verbose --file "${WORKSPACE}/${BUILD_NAME}.tgz" bin include lib share'
+                                s3Upload consoleLogLevel: 'INFO', dontSetBuildResultOnFailure: false, dontWaitForConcurrentBuildCompletion: false, entries: [[bucket: 'woc-epic-jenkins-artifacts', excludedFile: '', flatten: false, gzipFiles: false, keepForever: false, managedArtifacts: true, noUploadOnFailure: true, selectedRegion: 'us-east-1', showDirectlyInBrowser: false, sourceFile: "${env.BUILD_NAME}.tgz", storageClass: 'STANDARD', uploadFromSlave: false, useServerSideEncryption: false]], pluginFailureResultConstraint: 'FAILURE', profileName: 'main', userMetadata: []
+                            }
+                        }
+                    }
+
+                    stage('Test') {
+                        steps {
+                            echo "Testing SRW (${env.SRW_COMPILER}) on ${env.SRW_PLATFORM}"
+                            sh 'bash --login "${WORKSPACE}/.cicd/scripts/srw_test.sh"'
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /*
+    post {
+        always {
+            script {
+                def pw_clusters = ['pcluster_noaa_v2_use1', 'azcluster_noaa', 'gcluster_noaa_v2_usc1']
+                def clusters = []
+                if (params.SRW_PLATFORM_FILTER == 'all') {
+                    clusters = pw_clusters
+                } else if (params.SRW_PLATFORM_FILTER in pw_clusters) {
+                    clusters = [params.SRW_PLATFORM_FILTER]
+                } else {
+                    echo 'No Parallel Works clusters were used in build'
+                }
+
+                for (int i = 0; i < clusters.size(); ++i) {
+                    build job: 'NOAA-EPIC/parallel-works-jenkins-client/stop-cluster', parameters: [string(name: 'PW_CLUSTER_NAME', value: clusters[i])]
+                }
+            }
+        }
+    }
+    */
+}
