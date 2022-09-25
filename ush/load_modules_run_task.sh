@@ -90,6 +90,7 @@ jjob_fp="$2"
 #
 #-----------------------------------------------------------------------
 #
+set +u
 if [ ! -z ${SLURM_JOB_ID} ]; then
     export job=${SLURM_JOB_NAME}
     export jobid=${job}.${SLURM_JOB_ID}
@@ -100,6 +101,7 @@ else
     export job=${task_name}
     export jobid=${job}.$$
 fi
+set -u
 #
 #-----------------------------------------------------------------------
 #
